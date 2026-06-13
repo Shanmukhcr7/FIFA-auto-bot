@@ -22,4 +22,4 @@ class Config:
     BACKGROUNDS_DIR = os.path.join(ASSETS_DIR, 'backgrounds')
     
     # Links
-    PROMO_LINK = "https://shanmukhcr7.github.io/FIFA-world-cup-2026/"
+    PROMO_LINK = "https://fifa-world-cup-2026-pearl.vercel.app/"
