@@ -16,6 +16,10 @@ class PosterGenerator:
         self.width = 1080
         self.height = 1350
         
+        # Local bundled fonts
+        self.font_bold_path = os.path.join(Config.ASSETS_DIR, "Roboto-Bold.ttf")
+        self.font_regular_path = os.path.join(Config.ASSETS_DIR, "Roboto-Regular.ttf")
+
     def _download_image(self, url, filepath):
         if os.path.exists(filepath):
             return True
@@ -42,78 +46,91 @@ class PosterGenerator:
         return None
 
     def _create_background(self):
-        bg_path = os.path.join(Config.BACKGROUNDS_DIR, "default.jpg")
+        bg_path = os.path.join(Config.BACKGROUNDS_DIR, "stadium.png")
         if os.path.exists(bg_path):
-            return Image.open(bg_path).convert("RGBA")
+            img = Image.open(bg_path).convert("RGBA")
+            # Resize to ensure it perfectly matches the canvas size
+            return img.resize((self.width, self.height), Image.Resampling.LANCZOS)
         
-        # Create a default dark gradient background if none exists
-        img = Image.new("RGBA", (self.width, self.height), "#1a1a2e")
-        draw = ImageDraw.Draw(img)
-        for y in range(self.height):
-            r = int(26 + (y / self.height) * 20)
-            g = int(26 + (y / self.height) * 20)
-            b = int(46 + (y / self.height) * 30)
-            draw.line([(0, y), (self.width, y)], fill=(r, g, b, 255))
+        # Fallback if image is missing
+        img = Image.new("RGBA", (self.width, self.height), "#0B0E14")
         return img
 
+    def _add_drop_shadow(self, img, offset=(10, 10), radius=15, color=(0,0,0,150)):
+        # Pad the image so the shadow doesn't get clipped
+        padding = radius * 2
+        padded_size = (img.size[0] + padding*2, img.size[1] + padding*2)
+        
+        background = Image.new("RGBA", padded_size, (0,0,0,0))
+        shadow = Image.new("RGBA", padded_size, (0,0,0,0))
+        
+        # Create shadow mask
+        shadow.paste(color, (padding + offset[0], padding + offset[1]), mask=img)
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius))
+        
+        # Paste shadow then original image
+        background.paste(shadow, (0,0), shadow)
+        background.paste(img, (padding, padding), img)
+        return background
+
     def generate_poster(self, match):
-        """Generates a poster for the match and returns the file path."""
+        """Generates an aesthetic poster for the match."""
         match_id = match['match_id']
         poster_path = os.path.join(Config.POSTERS_DIR, f"match_{match_id}.jpg")
         
-        if os.path.exists(poster_path):
-            return poster_path
-            
         try:
             bg = self._create_background()
             draw = ImageDraw.Draw(bg)
             
-            # Download flags
+            # Load Fonts
+            try:
+                font_super = ImageFont.truetype(self.font_bold_path, 120)
+                font_title = ImageFont.truetype(self.font_bold_path, 80)
+                font_subtitle = ImageFont.truetype(self.font_regular_path, 45)
+                font_small = ImageFont.truetype(self.font_regular_path, 35)
+            except:
+                font_super = font_title = font_subtitle = font_small = ImageFont.load_default()
+            
+            # Header
+            draw.text((self.width//2, 100), "FIFA WORLD CUP 2026", font=font_title, fill="#E6C861", anchor="mm")
+            draw.text((self.width//2, 180), match['stage'].upper(), font=font_subtitle, fill="#A0AEC0", anchor="mm")
+            
+            # Flags Setup
             home_flag_path = self._get_flag(match['home_team_id'], match['home_team_logo'])
             away_flag_path = self._get_flag(match['away_team_id'], match['away_team_logo'])
             
-            # Load and paste flags
-            flag_size = (300, 300)
+            flag_max_size = (350, 240)
+            flag_y = 600
+            
             if home_flag_path and os.path.exists(home_flag_path):
                 try:
-                    home_img = Image.open(home_flag_path).convert("RGBA").resize(flag_size)
-                    bg.paste(home_img, (150, 400), home_img)
+                    home_img = Image.open(home_flag_path).convert("RGBA")
+                    home_img.thumbnail(flag_max_size, Image.Resampling.LANCZOS)
+                    home_img = self._add_drop_shadow(home_img)
+                    w, h = home_img.size
+                    bg.paste(home_img, (270 - w//2, flag_y - h//2), home_img)
                 except Exception as e:
                     logger.error(f"Error processing home flag: {e}")
                     
             if away_flag_path and os.path.exists(away_flag_path):
                 try:
-                    away_img = Image.open(away_flag_path).convert("RGBA").resize(flag_size)
-                    bg.paste(away_img, (630, 400), away_img)
+                    away_img = Image.open(away_flag_path).convert("RGBA")
+                    away_img.thumbnail(flag_max_size, Image.Resampling.LANCZOS)
+                    away_img = self._add_drop_shadow(away_img)
+                    w, h = away_img.size
+                    bg.paste(away_img, (810 - w//2, flag_y - h//2), away_img)
                 except Exception as e:
                     logger.error(f"Error processing away flag: {e}")
             
-            # Add "VS" text
-            try:
-                font_vs = ImageFont.truetype("arial.ttf", 100)
-                font_title = ImageFont.truetype("arial.ttf", 60)
-                font_subtitle = ImageFont.truetype("arial.ttf", 40)
-            except:
-                font_vs = ImageFont.load_default()
-                font_title = ImageFont.load_default()
-                font_subtitle = ImageFont.load_default()
-            
-            draw.text((self.width//2, 550), "VS", font=font_vs, fill="white", anchor="mm")
+            # "VS" Center Text
+            draw.text((self.width//2, flag_y), "VS", font=font_super, fill="#FFFFFF", anchor="mm")
             
             # Team Names
-            draw.text((300, 750), match['home_team_name'][:15], font=font_title, fill="white", anchor="mm")
-            draw.text((780, 750), match['away_team_name'][:15], font=font_title, fill="white", anchor="mm")
-            
-            # Header
-            draw.text((self.width//2, 150), "FIFA WORLD CUP 2026", font=font_title, fill="#FFD700", anchor="mm")
-            draw.text((self.width//2, 250), match['stage'].upper(), font=font_subtitle, fill="white", anchor="mm")
-            
-            # Match Info
-            draw.text((self.width//2, 950), f"Venue: {match['venue']}", font=font_subtitle, fill="#CCCCCC", anchor="mm")
-            draw.text((self.width//2, 1050), f"Promo: {Config.PROMO_LINK}", font=font_subtitle, fill="#00FF00", anchor="mm")
+            draw.text((270, flag_y + 180), match['home_team_name'].upper()[:15], font=font_title, fill="#FFFFFF", anchor="mm")
+            draw.text((810, flag_y + 180), match['away_team_name'].upper()[:15], font=font_title, fill="#FFFFFF", anchor="mm")
             
             bg = bg.convert("RGB")
-            bg.save(poster_path, quality=90)
+            bg.save(poster_path, quality=95)
             return poster_path
             
         except Exception as e:
