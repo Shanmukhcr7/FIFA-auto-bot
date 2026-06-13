@@ -67,10 +67,8 @@ class SchedulerManager:
             
             # --- Scheduled Reminders ---
             # Map of notification labels to their time thresholds (in hours before kickoff)
+            # User specifically requested ONLY sending at match start time
             reminders = {
-                '24h': (23.9, 24.1, "24 Hours"),
-                '12h': (11.9, 12.1, "12 Hours"),
-                '1h': (0.9, 1.1, "1 Hour"),
                 'kickoff': (-0.1, 0.1, "Kickoff!")
             }
             
