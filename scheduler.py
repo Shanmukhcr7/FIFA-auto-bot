@@ -84,25 +84,28 @@ class SchedulerManager:
                         break
             
             # --- Scheduled Reminders ---
-            # Map of notification labels to their time thresholds (in hours before kickoff)
-            # User specifically requested ONLY sending at match start time
-            reminders = {
-                'kickoff': (-0.1, 0.1, "Kickoff!")
-            }
+            # If the bot was offline during kickoff, we should still send the kickoff message
+            # if the match is currently live (between 0 and 130 minutes) so we can update it later.
+            should_send_kickoff = False
             
-            for r_type, (min_h, max_h, label) in reminders.items():
-                if min_h <= hours_diff <= max_h:
-                    if not self.db.is_notification_sent(match['match_id'], r_type):
-                        logger.info(f"Sending {r_type} reminder for match {match['match_id']}")
-                        
-                        poster = self.poster_gen.generate_poster(match)
-                        text = self.notifier.format_match_reminder(match, label)
-                        
-                        msg_id = await self.notifier.send_message(text, photo_path=poster)
-                        self.db.mark_notification_sent(match['match_id'], r_type)
-                        
-                        if r_type == 'kickoff' and msg_id:
-                            self.db.set_kickoff_message_id(match['match_id'], msg_id)
+            # Normal kickoff window (-6 to +6 mins)
+            if -0.1 <= hours_diff <= 0.1:
+                should_send_kickoff = True
+            # Missed kickoff catch-up window (if match is actively playing right now)
+            elif 0 < minutes_passed < 130:
+                should_send_kickoff = True
+                
+            if should_send_kickoff and not self.db.is_notification_sent(match['match_id'], 'kickoff'):
+                logger.info(f"Sending kickoff reminder for match {match['match_id']}")
+                
+                poster = self.poster_gen.generate_poster(match)
+                text = self.notifier.format_match_reminder(match, "Kickoff!")
+                
+                msg_id = await self.notifier.send_message(text, photo_path=poster)
+                self.db.mark_notification_sent(match['match_id'], 'kickoff')
+                
+                if msg_id:
+                    self.db.set_kickoff_message_id(match['match_id'], msg_id)
 
     async def send_daily_digest(self):
         logger.info("Sending daily digest...")
