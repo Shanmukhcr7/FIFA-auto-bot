@@ -27,12 +27,22 @@ class SchedulerManager:
         # Job to send daily digest at 8 AM IST
         self.scheduler.add_job(self.send_daily_digest, 'cron', hour=8, minute=0, id='daily_digest')
         
+        # Run an initial sync immediately on startup
+        import asyncio
+        asyncio.create_task(self.sync_fixtures())
+        
         self.scheduler.start()
         logger.info("Scheduler started successfully.")
 
     async def sync_fixtures(self):
         logger.info("Syncing fixtures from ESPN...")
-        fixtures = self.espn.get_fixtures()
+        now = datetime.utcnow()
+        end_date = now + timedelta(days=7)
+        # Fetch fixtures for the next 7 days to ensure we don't miss tomorrow's matches
+        fixtures = self.espn.get_fixtures(
+            start_date=now.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d")
+        )
         if fixtures:
             self.db.update_fixtures(fixtures)
             logger.info(f"Successfully synced {len(fixtures)} fixtures.")
@@ -41,6 +51,15 @@ class SchedulerManager:
         upcoming = self.db.get_upcoming_fixtures()
         now = datetime.utcnow().replace(tzinfo=pytz.utc)
         
+        # Prefetch the next 7 days of data once for all result checking
+        latest_fixtures = []
+        if any(minutes_passed >= 130 for match in upcoming for minutes_passed in [(now - datetime.strptime(match['date'], "%Y-%m-%dT%H:%MZ").replace(tzinfo=pytz.utc)).total_seconds() / 60.0 if not match.get('result_updated') and match.get('kickoff_message_id') else 0]):
+            end_date = now + timedelta(days=7)
+            latest_fixtures = self.espn.get_fixtures(
+                start_date=(now - timedelta(days=2)).strftime("%Y%m%d"), # Look back 2 days for recently finished matches
+                end_date=end_date.strftime("%Y%m%d")
+            )
+            
         for match in upcoming:
             # Parse kickoff time
             try:
@@ -53,14 +72,13 @@ class SchedulerManager:
             minutes_passed = time_diff.total_seconds() / 60.0
             hours_diff = -time_diff.total_seconds() / 3600.0 # Negative means in the future
             
-            # --- Check if match is finished (>= 100 minutes after kickoff) ---
-            if minutes_passed >= 100 and match.get('kickoff_message_id') and not match.get('result_updated'):
+            # --- Check if match is finished (>= 130 minutes after kickoff) ---
+            if minutes_passed >= 130 and match.get('kickoff_message_id') and not match.get('result_updated'):
                 logger.info(f"Checking if match {match['match_id']} is finished...")
-                # Fetch fresh data for this specific match (or all and filter)
-                latest_fixtures = self.espn.get_fixtures()
                 for latest in latest_fixtures:
                     if latest['match_id'] == match['match_id']:
-                        if latest['status'] == 'STATUS_FINAL':
+                        # ESPN uses STATUS_FULL_TIME for finished soccer matches
+                        if latest['status'] in ['STATUS_FULL_TIME', 'STATUS_POSTPONED', 'STATUS_CANCELED']:
                             await self.notifier.update_match_result(match['kickoff_message_id'], latest)
                             self.db.set_result_updated(match['match_id'])
                         break
